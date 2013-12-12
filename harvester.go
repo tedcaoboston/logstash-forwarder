@@ -13,11 +13,13 @@ type Harvester struct {
   Path string /* the file path to harvest */
   Fields map[string]string
   Offset int64
+  Multiline MultilineConfig
 
   file *os.File /* the file being watched */
 }
 
 func (h *Harvester) Harvest(output chan *FileEvent) {
+
   if h.Offset > 0 {
     log.Printf("Starting harvester at position %d: %s\n", h.Offset, h.Path)
   } else {

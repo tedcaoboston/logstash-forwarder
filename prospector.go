@@ -14,7 +14,7 @@ func Prospect(fileconfig FileConfig, output chan *FileEvent) {
   // Handle any "-" (stdin) paths
   for i, path := range fileconfig.Paths {
     if path == "-" {
-      harvester := Harvester{Path: path, Fields: fileconfig.Fields}
+      harvester := Harvester{Path: path, Fields: fileconfig.Fields, Multiline: fileconfig.Multiline}
       go harvester.Harvest(output)
 
       // Remove it from the file list
@@ -58,7 +58,7 @@ func resume_tracking(fileconfig FileConfig, fileinfo map[string]os.FileInfo, out
         for _, pathglob := range fileconfig.Paths {
           match, _ := filepath.Match(pathglob, path)
           if match {
-            harvester := Harvester{Path: path, Fields: fileconfig.Fields, Offset: state.Offset }
+            harvester := Harvester{Path: path, Fields: fileconfig.Fields, Offset: state.Offset, Multiline: fileconfig.Multiline }
             go harvester.Harvest(output)
             break
           }

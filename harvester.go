@@ -7,6 +7,8 @@ import (
   "io"
   "bufio"
   "time"
+  "regexp"
+  "fmt"
 )
 
 type Harvester struct {
@@ -19,6 +21,14 @@ type Harvester struct {
 }
 
 func (h *Harvester) Harvest(output chan *FileEvent) {
+
+  var pending bytes.Buffer
+  var previousMatch bool
+  var multilineMatcher *regexp.Regexp
+
+  if h.Multiline.Enabled {
+  	multilineMatcher = regexp.MustCompile(h.Multiline.Pattern)
+  }
 
   if h.Offset > 0 {
     log.Printf("Starting harvester at position %d: %s\n", h.Offset, h.Path)
@@ -72,18 +82,65 @@ func (h *Harvester) Harvest(output chan *FileEvent) {
     last_read_time = time.Now()
 
     line++
-    event := &FileEvent{
-      Source: &h.Path,
-      Offset: offset,
-      Line: line,
-      Text: text,
-      Fields: &h.Fields,
-      fileinfo: &info,
-    }
-    offset += int64(len(*event.Text)) + 1  // +1 because of the line terminator
+    offset += int64(len(*text)) + 1  // +1 because of the line terminator
 
-    output <- event // ship the new event downstream
+    accept, text_to_send := filter(&h.Multiline, multilineMatcher, &pending, *text, &previousMatch)
+
+    if accept {
+      output <- &FileEvent{
+        Source: &h.Path,
+        Offset: offset,
+        Line: line,
+        Text: &text_to_send,
+        Fields: &h.Fields,
+        fileinfo: &info,
+      }
+      log.Printf("Sending %s\n", text_to_send)
+    }
+
   } /* forever */
+}
+
+func filter(multiline *MultilineConfig, matcher *regexp.Regexp, pending *bytes.Buffer, text string, previousMatch *bool) (accept bool, text_to_send string) {
+
+  accept = false
+
+  if !multiline.Enabled {
+    accept = true
+    text_to_send = text
+  } else {
+    match := (matcher.MatchString(text) && !multiline.Negate) || (!matcher.MatchString(text) && multiline.Negate)
+    log.Printf("text=%s pattern=%s what=%s negate=%t match=%t\n", text, multiline.Pattern, multiline.What, match, multiline.Negate)
+
+    if multiline.What == "previous" {
+      if match {	
+        if !*previousMatch && pending.Len() != 0 {
+          text_to_send = pending.String()
+          pending.Reset()
+          accept = true
+        }
+      } else if pending.Len() != 0 {		
+        text_to_send = pending.String()
+        pending.Reset()
+        accept = true
+      }
+      pending.WriteString(text) 			
+      *previousMatch = match
+    } else if multiline.What == "next" {
+      if match {	
+        pending.WriteString(text) 			
+      } else {
+        pending.WriteString(text) 			
+        text_to_send = pending.String()
+        pending.Reset()
+        accept = true			
+      }
+    } else {
+      panic(fmt.Sprintf("multiline of what=%s is not supported\n", multiline.What))		
+    }		
+  }
+  	
+  return accept, text_to_send
 }
 
 func (h *Harvester) open() *os.File {

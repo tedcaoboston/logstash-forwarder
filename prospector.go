@@ -27,7 +27,7 @@ func Prospect(fileconfig FileConfig, output chan *FileEvent) {
 
   for {
     for _, path := range fileconfig.Paths {
-      prospector_scan(path, fileconfig.Fields, fileinfo, output)
+      prospector_scan(path, fileconfig.Fields, fileinfo, output, &fileconfig.Multiline)
     }
 
     // Defer next scan for a bit.
@@ -70,7 +70,7 @@ func resume_tracking(fileconfig FileConfig, fileinfo map[string]os.FileInfo, out
 
 func prospector_scan(path string, fields map[string]string, 
                      fileinfo map[string]os.FileInfo,
-                     output chan *FileEvent) {
+                     output chan *FileEvent, multiline *MultilineConfig) {
   //log.Printf("Prospecting %s\n", path)
 
   // Evaluate the path as a wildcards/shell glob
@@ -119,14 +119,14 @@ func prospector_scan(path string, fields map[string]string,
       } else {
         // Most likely a new file. Harvest it!
         log.Printf("Launching harvester on new file: %s\n", file)
-        harvester := Harvester{Path: file, Fields: fields}
+        harvester := Harvester{Path: file, Fields: fields, Multiline: *multiline}
         go harvester.Harvest(output)
       }
     } else if !is_fileinfo_same(lastinfo, info) {
       log.Printf("Launching harvester on rotated file: %s\n", file)
       // TODO(sissel): log 'file rotated' or osmething
       // Start a harvester on the path; a new file appeared with the same name.
-      harvester := Harvester{Path: file, Fields: fields}
+      harvester := Harvester{Path: file, Fields: fields, Multiline: *multiline}
       go harvester.Harvest(output)
     }
   } // for each file matched by the glob

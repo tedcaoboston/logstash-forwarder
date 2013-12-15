@@ -84,7 +84,7 @@ func (h *Harvester) Harvest(output chan *FileEvent) {
     line++
     offset += int64(len(*text)) + 1  // +1 because of the line terminator
 
-    accept, text_to_send := filter(&h.Multiline, multilineMatcher, &pending, *text, &previousMatch)
+    accept, text_to_send := filter(h, multilineMatcher, &pending, *text, &previousMatch)
 
     if accept {
       output <- &FileEvent{
@@ -95,51 +95,53 @@ func (h *Harvester) Harvest(output chan *FileEvent) {
         Fields: &h.Fields,
         fileinfo: &info,
       }
-      log.Printf("Sending %s\n", text_to_send)
     }
 
   } /* forever */
 }
 
-func filter(multiline *MultilineConfig, matcher *regexp.Regexp, pending *bytes.Buffer, text string, previousMatch *bool) (accept bool, text_to_send string) {
+func filter(harvester *Harvester, matcher *regexp.Regexp, pending *bytes.Buffer, text string, previousMatch *bool) (accept bool, text_to_send string) {
 
   accept = false
 
-  if !multiline.Enabled {
-    accept = true
-    text_to_send = text
-  } else {
-    match := (matcher.MatchString(text) && !multiline.Negate) || (!matcher.MatchString(text) && multiline.Negate)
-    log.Printf("text=%s pattern=%s what=%s negate=%t match=%t\n", text, multiline.Pattern, multiline.What, match, multiline.Negate)
+  if !harvester.Multiline.Enabled {
+	return true, text
+  } 
+  
+  match := (matcher.MatchString(text) && !harvester.Multiline.Negate) || (!matcher.MatchString(text) && harvester.Multiline.Negate)
 
-    if multiline.What == "previous" {
-      if match {	
-        if !*previousMatch && pending.Len() != 0 {
-          text_to_send = pending.String()
-          pending.Reset()
-          accept = true
-        }
-      } else if pending.Len() != 0 {		
+  if harvester.Multiline.What == "previous" {    
+    if match {	
+      if !*previousMatch && pending.Len() != 0 {	// this is sending the unmatched text previously in the pending buffer
         text_to_send = pending.String()
         pending.Reset()
-        accept = true
+        accept = true          
       }
+    } else if pending.Len() != 0 {					// hitting an unmatched text and thus flushing pending buffer regardless of previous state
+      text_to_send = pending.String()
+      pending.Reset()
+      accept = true
+    }
+    pending.WriteString(text) 			
+  } else if harvester.Multiline.What == "next" {
+    if match {	
       pending.WriteString(text) 			
-      *previousMatch = match
-    } else if multiline.What == "next" {
-      if match {	
-        pending.WriteString(text) 			
-      } else {
-        pending.WriteString(text) 			
-        text_to_send = pending.String()
-        pending.Reset()
-        accept = true			
-      }
     } else {
-      panic(fmt.Sprintf("multiline of what=%s is not supported\n", multiline.What))		
-    }		
-  }
-  	
+      pending.WriteString(text) 					// hitting an unmatched text and thus flushing pending buffer along with unmatched text
+      text_to_send = pending.String()
+      pending.Reset()
+      accept = true			
+    }
+  } else {
+    panic(fmt.Sprintf("multiline of what=%s is not supported\n", harvester.Multiline.What))		
+  }		
+
+  if accept && *previousMatch {      				// if we are sending text and previous line is matched, then tag it as multiline text
+    harvester.Fields["multiline"] = "true"
+  }            
+
+  *previousMatch = match							// capture matching state 
+
   return accept, text_to_send
 }
 
